@@ -13,6 +13,26 @@ func Ingress(ing slim_networkingv1.Ingress) model.HTTPListener {
 
 	l := model.HTTPListener{}
 
+	l.Port = 80
+
+	for _, tls := range ing.Spec.TLS {
+
+		l.Port = 443
+
+		l.Hostnames = append(l.Hostnames, tls.Hosts...)
+
+	}
+
+	sourceResource := model.FullyQualifiedResource{
+		Name:      ing.Name,
+		Namespace: ing.Namespace,
+		Group:     "",
+		Version:   "v1",
+		Kind:      "Ingress",
+	}
+
+	l.Sources = append(l.Sources, sourceResource)
+
 	return l
 
 }

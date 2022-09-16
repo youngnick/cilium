@@ -23,18 +23,15 @@ type HTTPListener struct {
 	Address string
 	// Port on which the service can be expected to be accessed by clients.
 	Port uint32
-	// VirtualHost details that the listener should match
-	// Each VirtualHost contains a hostname, and optionally TLS secret details.
-	// If no VirtualHosts contain TLS details, then this is an insecure HTTPListener
-	VirtualHosts []VirtualHost
+	// Hostnames that the listener should match.
+	// Wildcards are supported in prefix or suffix forms, or the special wildcard `*`.
+	// An empty list means that the Listener should match all hostnames.
+	Hostnames []string
+	// TLS Certifcate information. If omitted, then the listener is a cleartext HTTP listener.
+	TLS *TLSSecret
 	// Routes associated with HTTP traffic to the service.
 	// An empty list means that traffic will not be routed.
 	Routes []HTTPRoute
-}
-
-type VirtualHost struct {
-	Hostname string
-	TLS      *TLSSecret
 }
 
 // FullyQualifiedResource stores the full details of a Kubernetes resource, including

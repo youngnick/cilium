@@ -1,14 +1,17 @@
 package ingestion
 
 import (
-	"encoding/json"
 	"testing"
 
+	"github.com/cilium/cilium/operator/pkg/model"
 	slim_networkingv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/networking/v1"
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
+	"github.com/stretchr/testify/assert"
 )
 
 var exactPathType = slim_networkingv1.PathTypeExact
+
+var prefixPathType = slim_networkingv1.PathTypePrefix
 
 var testAnnotations = map[string]string{
 	"service.beta.kubernetes.io/dummy-load-balancer-backend-protocol":    "http",
@@ -16,7 +19,216 @@ var testAnnotations = map[string]string{
 	"service.alpha.kubernetes.io/dummy-load-balancer-access-log-enabled": "true",
 }
 
-var baseIngress = &slim_networkingv1.Ingress{
+// Add the ingress objects in
+// https://github.com/kubernetes-sigs/ingress-controller-conformance/tree/master/features
+// as test fixtures
+
+var defaultBackend = &slim_networkingv1.Ingress{
+	ObjectMeta: slim_metav1.ObjectMeta{
+		Name:      "load-balancing",
+		Namespace: "random-namespace",
+	},
+	Spec: slim_networkingv1.IngressSpec{
+		IngressClassName: stringp("cilium"),
+		DefaultBackend: &slim_networkingv1.IngressBackend{
+			Service: &slim_networkingv1.IngressServiceBackend{
+				Name: "default-backend",
+				Port: slim_networkingv1.ServiceBackendPort{
+					Number: 8080,
+				},
+			},
+		},
+	},
+}
+
+var defaultBackendListeners = []model.HTTPListener{
+	{
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "load-balancing",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "*",
+		Routes: []model.HTTPRoute{
+			{
+				Backends: []model.Backend{
+					{
+						Name:      "default-backend",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var hostRules = &slim_networkingv1.Ingress{
+	ObjectMeta: slim_metav1.ObjectMeta{
+		Name:      "host-rules",
+		Namespace: "random-namespace",
+	},
+	Spec: slim_networkingv1.IngressSpec{
+		TLS: []slim_networkingv1.IngressTLS{
+			{
+				Hosts:      []string{"foo.bar.com"},
+				SecretName: "conformance-tls",
+			},
+		},
+		Rules: []slim_networkingv1.IngressRule{
+			{
+				Host: "*.foo.com",
+				IngressRuleValue: slim_networkingv1.IngressRuleValue{
+					HTTP: &slim_networkingv1.HTTPIngressRuleValue{
+						Paths: []slim_networkingv1.HTTPIngressPath{
+							{
+								Path: "/",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "wildcard-foo-com",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+						},
+					},
+				},
+			},
+			{
+				Host: "foo.bar.com",
+				IngressRuleValue: slim_networkingv1.IngressRuleValue{
+					HTTP: &slim_networkingv1.HTTPIngressRuleValue{
+						Paths: []slim_networkingv1.HTTPIngressPath{
+							{
+								Path: "/",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "foo-bar-com",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Name: "http",
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var hostRulesListeners = []model.HTTPListener{
+	{
+		Name: "ing-host-rules-random-namespace-*.foo.com",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "host-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "*.foo.com",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "wildcard-foo-com",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Name: "ing-host-rules-random-namespace-foo.bar.com",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "host-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "foo.bar.com",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-bar-com",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Name: "http",
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Name: "ing-host-rules-random-namespace-foo.bar.com",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "host-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+			{
+				Name:      "host-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     443,
+		Hostname: "foo.bar.com",
+		TLS: &model.TLSSecret{
+			Name:      "conformance-tls",
+			Namespace: "random-namespace",
+		},
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-bar-com",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Name: "http",
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var complexIngress = &slim_networkingv1.Ingress{
 	ObjectMeta: slim_metav1.ObjectMeta{
 		Name:        "dummy-ingress",
 		Namespace:   "dummy-namespace",
@@ -70,6 +282,7 @@ var baseIngress = &slim_networkingv1.Ingress{
 										},
 									},
 								},
+								PathType: &prefixPathType,
 							},
 						},
 					},
@@ -79,18 +292,39 @@ var baseIngress = &slim_networkingv1.Ingress{
 	},
 }
 
+var complexIngressListeners = []model.HTTPListener{}
+
 func stringp(in string) *string {
 	return &in
 }
 
+type testcase struct {
+	ingress slim_networkingv1.Ingress
+	want    []model.HTTPListener
+}
+
 func TestIngress(t *testing.T) {
 
-	listener := Ingress(*baseIngress)
-
-	listenerJSON, err := json.MarshalIndent(listener, "", "\t")
-	if err != nil {
-		t.Fatal("Failed to marshal listener", err)
+	tests := map[string]testcase{
+		"defaultBackend": {
+			ingress: *defaultBackend,
+			want:    defaultBackendListeners,
+		},
+		"conformance host rules test": {
+			ingress: *hostRules,
+			want:    hostRulesListeners,
+		},
+		"cilium test ingress": {
+			ingress: *complexIngress,
+			want:    complexIngressListeners,
+		},
 	}
 
-	t.Fatal(string(listenerJSON))
+	for name, tc := range tests {
+
+		t.Run(name, func(t *testing.T) {
+			listeners := Ingress(tc.ingress)
+			assert.Equal(t, listeners, tc.want, "Listeners did not match")
+		})
+	}
 }

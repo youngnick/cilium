@@ -11,12 +11,19 @@ import (
 	slim_networkingv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/networking/v1"
 )
 
-// Ingress translates an Ingress resource to a HTTPListener
+// Ingress translates an Ingress resource to a HTTPListener.
+// This function does not check IngressClass (via field or annotation).
+// It's expected that only relevant Ingresses will have this function called on them.
 func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 
 	// First, we make a map of HTTPListeners, with the hostname
 	// as the key, so that we can make sure we match up any
 	// TLS config with rules that match it.
+	// This is to approximate a set, keyed by hostname, so we can
+	// coalesce the config from a single Ingress.
+	// Coalescing the config from multiple Ingress resources is left for
+	// the transform component that takes a model and outputs CiliumEnvoyConfig
+	// or other resources.
 	insecureListenerMap := make(map[string]model.HTTPListener)
 
 	sourceResource := model.FullyQualifiedResource{
@@ -155,6 +162,7 @@ func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 					}
 				}
 				defaultListener.Hostname = host
+				defaultListener.Port = 443
 				secureListenerMap[host] = defaultListener
 
 			}
@@ -171,6 +179,8 @@ func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 
 }
 
+// appendValuesInKeyOrder ensures that the slice of listeners is stably sorted by
+// appending the values of the map in order of the keys to the appendSlice.
 func appendValuesInKeyOrder(listenerMap map[string]model.HTTPListener, appendSlice []model.HTTPListener) []model.HTTPListener {
 
 	var keys []string

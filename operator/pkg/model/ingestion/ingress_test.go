@@ -196,6 +196,8 @@ var hostRulesListeners = []model.HTTPListener{
 				Version:   "v1",
 				Kind:      "Ingress",
 			},
+			// TODO(youngnick): Add some deduplication logic into the Sources
+			// field. (Maybe an add method or something?)
 			{
 				Name:      "host-rules",
 				Namespace: "random-namespace",
@@ -292,7 +294,193 @@ var complexIngress = &slim_networkingv1.Ingress{
 	},
 }
 
-var complexIngressListeners = []model.HTTPListener{}
+var complexIngressListeners = []model.HTTPListener{
+	{
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "dummy-ingress",
+				Namespace: "dummy-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+			{
+				Name:      "dummy-ingress",
+				Namespace: "dummy-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "*",
+		Routes: []model.HTTPRoute{
+			{
+				Backends: []model.Backend{
+					{
+						Name:      "default-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Exact: "/dummy-path",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "dummy-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/another-dummy-path",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "another-dummy-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8081,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "dummy-ingress",
+				Namespace: "dummy-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+			{
+				Name:      "dummy-ingress",
+				Namespace: "dummy-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     443,
+		Hostname: "another-very-secure.server.com",
+		TLS: &model.TLSSecret{
+			Name:      "tls-another-very-secure-server-com",
+			Namespace: "dummy-namespace",
+		},
+		Routes: []model.HTTPRoute{
+			{
+				Backends: []model.Backend{
+					{
+						Name:      "default-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Exact: "/dummy-path",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "dummy-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/another-dummy-path",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "another-dummy-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8081,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "dummy-ingress",
+				Namespace: "dummy-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+			{
+				Name:      "dummy-ingress",
+				Namespace: "dummy-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     443,
+		Hostname: "very-secure.server.com",
+		TLS: &model.TLSSecret{
+			Name:      "tls-very-secure-server-com",
+			Namespace: "dummy-namespace",
+		},
+		Routes: []model.HTTPRoute{
+			{
+				Backends: []model.Backend{
+					{
+						Name:      "default-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Exact: "/dummy-path",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "dummy-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/another-dummy-path",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "another-dummy-backend",
+						Namespace: "dummy-namespace",
+						Port: &model.BackendPort{
+							Port: 8081,
+						},
+					},
+				},
+			},
+		},
+	},
+}
 
 func stringp(in string) *string {
 	return &in

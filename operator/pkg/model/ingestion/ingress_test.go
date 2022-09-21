@@ -23,6 +23,7 @@ var testAnnotations = map[string]string{
 // https://github.com/kubernetes-sigs/ingress-controller-conformance/tree/master/features
 // as test fixtures
 
+// Just a default backend should produce one simple listener.
 var defaultBackend = &slim_networkingv1.Ingress{
 	ObjectMeta: slim_metav1.ObjectMeta{
 		Name:      "load-balancing",
@@ -69,6 +70,11 @@ var defaultBackendListeners = []model.HTTPListener{
 	},
 }
 
+// Ingress Conformance test resources
+
+// The hostRules resource from the ingress conformance test should produce
+// three listeners, one for host with no TLS config, then one insecure and one
+// secure for the host with TLS config.
 var hostRules = &slim_networkingv1.Ingress{
 	ObjectMeta: slim_metav1.ObjectMeta{
 		Name:      "host-rules",
@@ -222,6 +228,330 @@ var hostRulesListeners = []model.HTTPListener{
 	},
 }
 
+// The pathRules resource shouuld produce four listeners, one for each host
+// used in the Ingress.
+
+var pathRules = &slim_networkingv1.Ingress{
+	ObjectMeta: slim_metav1.ObjectMeta{
+		Name:      "path-rules",
+		Namespace: "random-namespace",
+	},
+	Spec: slim_networkingv1.IngressSpec{
+		Rules: []slim_networkingv1.IngressRule{
+			{
+				Host: "exact-path-rules",
+				IngressRuleValue: slim_networkingv1.IngressRuleValue{
+					HTTP: &slim_networkingv1.HTTPIngressRuleValue{
+						Paths: []slim_networkingv1.HTTPIngressPath{
+							{
+								Path: "/foo",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "foo-exact",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &exactPathType,
+							},
+						},
+					},
+				},
+			},
+			{
+				Host: "prefix-path-rules",
+				IngressRuleValue: slim_networkingv1.IngressRuleValue{
+					HTTP: &slim_networkingv1.HTTPIngressRuleValue{
+						Paths: []slim_networkingv1.HTTPIngressPath{
+							{
+								Path: "/foo",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "foo-prefix",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+							{
+								Path: "/aaa/bbb",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "aaa-slash-bbb-prefix",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+							{
+								Path: "/aaa",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "aaa-prefix",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+						},
+					},
+				},
+			},
+			{
+				Host: "mixed-path-rules",
+				IngressRuleValue: slim_networkingv1.IngressRuleValue{
+					HTTP: &slim_networkingv1.HTTPIngressRuleValue{
+						Paths: []slim_networkingv1.HTTPIngressPath{
+							{
+								Path: "/foo",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "foo-prefix",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+							{
+								Path: "/foo",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "foo-exact",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &exactPathType,
+							},
+						},
+					},
+				},
+			},
+			{
+				Host: "trailing-slash-path-rules",
+				IngressRuleValue: slim_networkingv1.IngressRuleValue{
+					HTTP: &slim_networkingv1.HTTPIngressRuleValue{
+						Paths: []slim_networkingv1.HTTPIngressPath{
+							{
+								Path: "/aaa/bbb/",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "aaa-slash-bbb-slash-prefix",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &prefixPathType,
+							},
+							{
+								Path: "/foo/",
+								Backend: slim_networkingv1.IngressBackend{
+									Service: &slim_networkingv1.IngressServiceBackend{
+										Name: "foo-slash-exact",
+										Port: slim_networkingv1.ServiceBackendPort{
+											Number: 8080,
+										},
+									},
+								},
+								PathType: &exactPathType,
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+var pathRulesListeners = []model.HTTPListener{
+	{
+		Name: "ing-path-rules-random-namespace-exact-path-rules",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "path-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "exact-path-rules",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Exact: "/foo",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-exact",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Name: "ing-path-rules-random-namespace-mixed-path-rules",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "path-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "mixed-path-rules",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/foo",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-prefix",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Exact: "/foo",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-exact",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Name: "ing-path-rules-random-namespace-prefix-path-rules",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "path-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "prefix-path-rules",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/foo",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-prefix",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/aaa/bbb",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "aaa-slash-bbb-prefix",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/aaa",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "aaa-prefix",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		Name: "ing-path-rules-random-namespace-trailing-slash-path-rules",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "path-rules",
+				Namespace: "random-namespace",
+				Version:   "v1",
+				Kind:      "Ingress",
+			},
+		},
+		Port:     80,
+		Hostname: "trailing-slash-path-rules",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Prefix: "/aaa/bbb/",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "aaa-slash-bbb-slash-prefix",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+			{
+				PathMatch: model.StringMatch{
+					Exact: "/foo/",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "foo-slash-exact",
+						Namespace: "random-namespace",
+						Port: &model.BackendPort{
+							Port: 8080,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+// The complexIngress resource from the operator/pkg/ingress testsuite should
+// produce three Listeners with identical routes, for the default host `*`,
+// and then the two TLS hostnames.
 var complexIngress = &slim_networkingv1.Ingress{
 	ObjectMeta: slim_metav1.ObjectMeta{
 		Name:        "dummy-ingress",
@@ -468,13 +798,17 @@ type testcase struct {
 func TestIngress(t *testing.T) {
 
 	tests := map[string]testcase{
-		"defaultBackend": {
+		"conformance default backend test": {
 			ingress: *defaultBackend,
 			want:    defaultBackendListeners,
 		},
 		"conformance host rules test": {
 			ingress: *hostRules,
 			want:    hostRulesListeners,
+		},
+		"conformance path rules test": {
+			ingress: *pathRules,
+			want:    pathRulesListeners,
 		},
 		"cilium test ingress": {
 			ingress: *complexIngress,

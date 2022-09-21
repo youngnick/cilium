@@ -169,7 +169,7 @@ func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 
 	}
 
-	var listenerSlice []model.HTTPListener
+	listenerSlice := []model.HTTPListener{}
 
 	listenerSlice = appendValuesInKeyOrder(insecureListenerMap, listenerSlice)
 	listenerSlice = appendValuesInKeyOrder(secureListenerMap, listenerSlice)

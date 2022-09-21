@@ -196,14 +196,6 @@ var hostRulesListeners = []model.HTTPListener{
 				Version:   "v1",
 				Kind:      "Ingress",
 			},
-			// TODO(youngnick): Add some deduplication logic into the Sources
-			// field. (Maybe an add method or something?)
-			{
-				Name:      "host-rules",
-				Namespace: "random-namespace",
-				Version:   "v1",
-				Kind:      "Ingress",
-			},
 		},
 		Port:     443,
 		Hostname: "foo.bar.com",
@@ -303,12 +295,6 @@ var complexIngressListeners = []model.HTTPListener{
 				Version:   "v1",
 				Kind:      "Ingress",
 			},
-			{
-				Name:      "dummy-ingress",
-				Namespace: "dummy-namespace",
-				Version:   "v1",
-				Kind:      "Ingress",
-			},
 		},
 		Port:     80,
 		Hostname: "*",
@@ -356,12 +342,6 @@ var complexIngressListeners = []model.HTTPListener{
 	},
 	{
 		Sources: []model.FullyQualifiedResource{
-			{
-				Name:      "dummy-ingress",
-				Namespace: "dummy-namespace",
-				Version:   "v1",
-				Kind:      "Ingress",
-			},
 			{
 				Name:      "dummy-ingress",
 				Namespace: "dummy-namespace",
@@ -419,12 +399,6 @@ var complexIngressListeners = []model.HTTPListener{
 	},
 	{
 		Sources: []model.FullyQualifiedResource{
-			{
-				Name:      "dummy-ingress",
-				Namespace: "dummy-namespace",
-				Version:   "v1",
-				Kind:      "Ingress",
-			},
 			{
 				Name:      "dummy-ingress",
 				Namespace: "dummy-namespace",
@@ -512,7 +486,7 @@ func TestIngress(t *testing.T) {
 
 		t.Run(name, func(t *testing.T) {
 			listeners := Ingress(tc.ingress)
-			assert.Equal(t, listeners, tc.want, "Listeners did not match")
+			assert.Equal(t, tc.want, listeners, "Listeners did not match")
 		})
 	}
 }

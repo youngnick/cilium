@@ -61,11 +61,10 @@ func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 						backend,
 					},
 				}},
-			Sources: []model.FullyQualifiedResource{
-				sourceResource,
-			},
 			Port: 80,
 		}
+
+		l.Sources = model.AddSource(l.Sources, sourceResource)
 
 		insecureListenerMap["*"] = l
 	}
@@ -81,7 +80,7 @@ func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 
 		l, ok := insecureListenerMap[host]
 		l.Port = 80
-		l.Sources = append(l.Sources, sourceResource)
+		l.Sources = model.AddSource(l.Sources, sourceResource)
 		if !ok {
 			l.Name = fmt.Sprintf("ing-%s-%s-%s", ing.Name, ing.Namespace, host)
 		}
@@ -137,7 +136,7 @@ func Ingress(ing slim_networkingv1.Ingress) []model.HTTPListener {
 				l = insecureListenerMap[host]
 			}
 
-			l.Sources = append(l.Sources, sourceResource)
+			l.Sources = model.AddSource(l.Sources, sourceResource)
 			if tlsConfig.SecretName != "" {
 				l.TLS = &model.TLSSecret{
 					Name: tlsConfig.SecretName,

@@ -116,8 +116,8 @@ By default, annotations with values beginning with:
 
 will be copied from an Ingress object to the generated LoadBalancer service objects.
 
-This setting is controlled by the ``ingress-lb-annotation-prefixes`` config item
-for Cilium's operator, and can be configured in Cilium's Helm ``values.yaml``
+This setting is controlled by the Cilium Operator's ``ingress-lb-annotation-prefixes``
+config flag, and can be configured in Cilium's Helm ``values.yaml``
 using the ``ingressController.ingressLBAnnotationPrefixes`` setting.
 
 Please refer to the `Kubernetes documentation <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`_

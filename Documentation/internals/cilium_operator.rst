@@ -237,7 +237,9 @@ Mutual Authentication Support
 
 When Cilium's Mutual Authentication Support is enabled, the Cilium Operator is
 responsible for ensuring that each Cilium Identity has an associated identity
-in the certificate management system (Currently only SPIRE is supported). It will
-create and delete SPIRE identity registrations as required. The Cilium Operator
-does not, however have any access at all to the key material in the identities.
-That information is only shared with the Cilium Agent via SPIRE channels.
+in the certificate management system. It will create and delete identity
+registrations in the configured certificate management section as required.
+The Cilium Operator does not, however have any to the key material in the
+identities.
+
+That information is only shared with the Cilium Agent via other channels.

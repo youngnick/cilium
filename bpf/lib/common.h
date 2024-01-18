@@ -944,14 +944,14 @@ struct ct_entry {
 	__u32 lifetime;
 	__u16 rx_closing:1,
 	      tx_closing:1,
-	      unused_nat46:1,	/* unused since v1.12 / 81dee05e82fb */
+	      auth_ok:1,	/* unused since v1.12 / 81dee05e82fb  unused_nat46 now auth_ok h*/
 	      lb_loopback:1,
 	      seen_non_syn:1,
 	      node_port:1,
 	      proxy_redirect:1, /* Connection is redirected to a proxy */
 	      dsr:1,
 	      from_l7lb:1, /* Connection is originated from an L7 LB proxy */
-	      reserved1:1, /* Was auth_required, not used in production anywhere */
+	      auth_required:1, /* Connection needs per connection mutual auth */
 	      from_tunnel:1, /* Connection is over tunnel */
 	      reserved:5;
 	__u16 rev_nat_index;
@@ -1145,9 +1145,10 @@ struct ct_state {
 	      syn:1,
 	      proxy_redirect:1,	/* Connection is redirected to a proxy */
 	      from_l7lb:1,	/* Connection is originated from an L7 LB proxy */
-	      reserved1:1,	/* Was auth_required, not used in production anywhere */
+	      auth_required :1,	/* Was auth_required, now it is again! MAGIC */
 	      from_tunnel:1,	/* Connection is from tunnel */
-	      reserved:8;
+		  auth_ok:1,	    /* Connection per connection mutual auth is OK */
+	      reserved:7;
 	__u32 src_sec_id;
 #ifndef HAVE_FIB_IFINDEX
 	__u16 ifindex;

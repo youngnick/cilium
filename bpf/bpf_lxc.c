@@ -897,6 +897,13 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 			/* Stack will do a socket match and deliver locally. */
 			return ctx_redirect_to_proxy4(ctx, tuple, 0, false);
 		}
+
+		// /* Check if auth is required and it was set */
+		// if (ct_state->auth_required && !ct_state->auth_ok) {
+		// 	verdict = DROP_POLICY_AUTH_REQUIRED;
+
+		// 	goto policy_verdict;
+		// }
 		/* proxy_port remains 0 in this case */
 		goto skip_policy_enforcement;
 	}
@@ -918,9 +925,25 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 				     &policy_match_type, &audited, ext_err, &proxy_port);
 
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
-		auth_type = (__u8)*ext_err;
-		verdict = auth_lookup(ctx, SECLABEL_IPV4, *dst_sec_identity, tunnel_endpoint,
-				      auth_type);
+		// auth_type = (__u8)*ext_err;
+
+		// // experimental auth mode
+		// if (ct_status == CT_NEW) {
+		// 		// create a contrac table entry, the further flow will skip this as it will be a policy deny
+		// 		// this way we create an entry to come back on later!
+		// 		ct_state_new.src_sec_id = SECLABEL;
+		// 		ret = ct_create4(ct_map, ct_related_map, tuple, ctx,
+		// 			CT_EGRESS, &ct_state_new, proxy_port > 0, from_l7lb, verdict == DROP_POLICY_AUTH_REQUIRED,
+		// 		 	ext_err);
+		// 		if (IS_ERR(ret))
+		// 			return ret;
+		
+		if (ct_state->auth_required && ct_state->auth_ok) {
+	 		verdict = CTX_ACT_OK; /* allow if auth done */
+		}
+
+		// verdict = auth_lookup(ctx, SECLABEL_IPV4, *dst_sec_identity, tunnel_endpoint,
+		//		      auth_type);
 	}
 
 	/* Emit verdict if drop or if allow for CT_NEW or CT_REOPENED. */
@@ -932,7 +955,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 					   auth_type);
 	}
 
-	if (verdict != CTX_ACT_OK)
+	if (verdict != CTX_ACT_OK && verdict != DROP_POLICY_AUTH_REQUIRED)
 		return verdict;
 
 skip_policy_enforcement:
@@ -948,7 +971,8 @@ ct_recreate4:
 		 * reverse NAT.
 		 */
 		ct_state_new.src_sec_id = SECLABEL_IPV4;
-
+		ct_state_new.auth_required = verdict == DROP_POLICY_AUTH_REQUIRED;
+		
 		ct_map = get_cluster_ct_map4(tuple, cluster_id);
 		if (!ct_map)
 			return DROP_CT_NO_MAP_FOUND;
@@ -1020,10 +1044,13 @@ ct_recreate4:
 		return DROP_UNKNOWN_CT;
 	}
 
+	// OH NO this crashes it
+	if (verdict != CTX_ACT_OK && verdict != DROP_POLICY_AUTH_REQUIRED)
+		return verdict;
+
 	/* After L4 write in port mapping: revalidate for direct packet access */
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
-
 #ifdef ENABLE_SRV6
 	{
 		__u32 *vrf_id;

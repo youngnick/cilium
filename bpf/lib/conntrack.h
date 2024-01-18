@@ -283,6 +283,8 @@ __ct_lookup(const void *map, struct __ctx_buff *ctx, const void *tuple,
 			ct_state->proxy_redirect = entry->proxy_redirect;
 			ct_state->from_l7lb = entry->from_l7lb;
 			ct_state->from_tunnel = entry->from_tunnel;
+			ct_state->auth_required = entry->auth_required;
+			ct_state->auth_ok = entry->auth_ok;
 #ifndef HAVE_FIB_IFINDEX
 			ct_state->ifindex = entry->ifindex;
 #endif

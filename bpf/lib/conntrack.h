@@ -1001,6 +1001,9 @@ static __always_inline int ct_create4(const void *map_main,
 		entry.from_l7lb = from_l7lb;
 	}
 
+	entry.auth_required = ct_state->auth_required;
+	entry.auth_ok = ct_state->auth_ok;
+
 	entry.rev_nat_index = ct_state->rev_nat_index;
 	seen_flags.value |= is_tcp ? TCP_FLAG_SYN : 0;
 	ct_update_timeout(&entry, is_tcp, dir, seen_flags);

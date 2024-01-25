@@ -487,8 +487,8 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
 		auth_type = (__u8)*ext_err;
-		verdict = auth_lookup(ctx, SECLABEL_IPV6, *dst_sec_identity, tunnel_endpoint,
-				      auth_type);
+		// verdict = auth_lookup(ctx, SECLABEL_IPV6, *dst_sec_identity, tunnel_endpoint,
+		// 		      auth_type);
 	}
 
 	/* Emit verdict if drop or if allow for CT_NEW or CT_REOPENED. */
@@ -817,7 +817,8 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 #endif
 	void *data, *data_end;
 	struct iphdr *ip4;
-	int ret, verdict, l4_off;
+	int ret, l4_off;
+	int verdict = CTX_ACT_OK;
 	struct trace_ctx trace = {
 		.reason = TRACE_REASON_UNKNOWN,
 		.monitor = 0,
@@ -898,12 +899,6 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 			return ctx_redirect_to_proxy4(ctx, tuple, 0, false);
 		}
 
-		// /* Check if auth is required and it was set */
-		// if (ct_state->auth_required && !ct_state->auth_ok) {
-		// 	verdict = DROP_POLICY_AUTH_REQUIRED;
-
-		// 	goto policy_verdict;
-		// }
 		/* proxy_port remains 0 in this case */
 		goto skip_policy_enforcement;
 	}
@@ -925,25 +920,9 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 				     &policy_match_type, &audited, ext_err, &proxy_port);
 
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
-		// auth_type = (__u8)*ext_err;
-
-		// // experimental auth mode
-		// if (ct_status == CT_NEW) {
-		// 		// create a contrac table entry, the further flow will skip this as it will be a policy deny
-		// 		// this way we create an entry to come back on later!
-		// 		ct_state_new.src_sec_id = SECLABEL;
-		// 		ret = ct_create4(ct_map, ct_related_map, tuple, ctx,
-		// 			CT_EGRESS, &ct_state_new, proxy_port > 0, from_l7lb, verdict == DROP_POLICY_AUTH_REQUIRED,
-		// 		 	ext_err);
-		// 		if (IS_ERR(ret))
-		// 			return ret;
-		
-		if (ct_state->auth_required && ct_state->auth_ok) {
-	 		verdict = CTX_ACT_OK; /* allow if auth done */
+		if (ct_state->auth_ok != 0) {
+	 		verdict = CTX_ACT_OK; /* allow if auth done */		
 		}
-
-		// verdict = auth_lookup(ctx, SECLABEL_IPV4, *dst_sec_identity, tunnel_endpoint,
-		//		      auth_type);
 	}
 
 	/* Emit verdict if drop or if allow for CT_NEW or CT_REOPENED. */
@@ -957,6 +936,8 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 
 	if (verdict != CTX_ACT_OK && verdict != DROP_POLICY_AUTH_REQUIRED)
 		return verdict;
+	// if (verdict == DROP_POLICY_AUTH_REQUIRED)
+	// 	goto ct_recreate4;
 
 skip_policy_enforcement:
 #if defined(ENABLE_L7_LB)
@@ -972,6 +953,7 @@ ct_recreate4:
 		 */
 		ct_state_new.src_sec_id = SECLABEL_IPV4;
 		ct_state_new.auth_required = verdict == DROP_POLICY_AUTH_REQUIRED;
+		ct_state_new.auth_ok = ct_state->auth_ok;
 		
 		ct_map = get_cluster_ct_map4(tuple, cluster_id);
 		if (!ct_map)
@@ -1044,8 +1026,12 @@ ct_recreate4:
 		return DROP_UNKNOWN_CT;
 	}
 
-	// OH NO this crashes it
-	if (verdict != CTX_ACT_OK && verdict != DROP_POLICY_AUTH_REQUIRED)
+	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
+		auth_type = (__u8)*ext_err;
+	 	verdict = auth_lookup(ctx, SECLABEL_IPV4, *dst_sec_identity, tunnel_endpoint, auth_type, tuple);
+	}
+
+	if (verdict != CTX_ACT_OK)
 		return verdict;
 
 	/* After L4 write in port mapping: revalidate for direct packet access */
@@ -1575,8 +1561,8 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, int ifindex, __u32 src_
 
 		if (sep) {
 			auth_type = (__u8)*ext_err;
-			verdict = auth_lookup(ctx, SECLABEL_IPV6, src_label,
-					      sep->tunnel_endpoint, auth_type);
+			// verdict = auth_lookup(ctx, SECLABEL_IPV6, src_label,
+			// 		      sep->tunnel_endpoint, auth_type);
 		}
 	}
 
@@ -1828,7 +1814,8 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 	bool is_untracked_fragment = false;
 	struct ct_buffer4 *ct_buffer;
 	struct trace_ctx trace;
-	int ret, verdict, l4_off;
+	int ret, l4_off;
+	int verdict = CTX_ACT_OK;
 	__be32 orig_sip;
 	__u8 policy_match_type = POLICY_MATCH_NONE;
 	__u8 audited = 0;
@@ -1864,7 +1851,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 	trace.reason = (enum trace_reason)ct_buffer->ret;
 	ret = ct_buffer->ret;
 	l4_off = ct_buffer->l4_off;
-
+	
 	/* Check it this is return traffic to an egress proxy.
 	 * Do not redirect again if the packet is coming from the egress proxy.
 	 * Always redirect connections that originated from L7 LB.
@@ -1933,14 +1920,11 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 				      SECLABEL_IPV4, &policy_match_type, &audited, ext_err,
 				      proxy_port);
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
-		struct remote_endpoint_info *sep = lookup_ip4_remote_endpoint(orig_sip, 0);
-
-		if (sep) {
-			auth_type = (__u8)*ext_err;
-			verdict = auth_lookup(ctx, SECLABEL, src_label,
-					      sep->tunnel_endpoint, auth_type);
+		if (ct_state->auth_ok != 0) {
+	 		verdict = CTX_ACT_OK; /* allow if auth done */		
 		}
 	}
+
 	/* Emit verdict if drop or if allow for CT_NEW or CT_REOPENED. */
 	if (verdict != CTX_ACT_OK || ret != CT_ESTABLISHED)
 		send_policy_verdict_notify(ctx, src_label, tuple->dport,
@@ -1948,7 +1932,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 					   verdict, *proxy_port, policy_match_type, audited,
 					   auth_type);
 
-	if (verdict != CTX_ACT_OK)
+	if (verdict != CTX_ACT_OK && verdict != DROP_POLICY_AUTH_REQUIRED)
 		return verdict;
 
 skip_policy_enforcement:
@@ -2000,7 +1984,19 @@ skip_policy_enforcement:
 	send_trace_notify4(ctx, TRACE_TO_LXC, src_label, SECLABEL_IPV4, orig_sip,
 			   LXC_ID, ifindex, trace.reason, trace.monitor);
 
-	return CTX_ACT_OK;
+
+	
+	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
+		struct remote_endpoint_info *sep = lookup_ip4_remote_endpoint(orig_sip, 0);
+
+		if (sep) {
+			auth_type = (__u8)*ext_err;
+			verdict = auth_lookup(ctx, SECLABEL, src_label,
+					      sep->tunnel_endpoint, auth_type, tuple);
+		}
+	}
+
+	return verdict;
 }
 
 declare_tailcall_if(__and(is_defined(ENABLE_IPV4), is_defined(ENABLE_IPV6)),

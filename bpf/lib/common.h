@@ -944,7 +944,7 @@ struct ct_entry {
 	__u32 lifetime;
 	__u16 rx_closing:1,
 	      tx_closing:1,
-	      auth_ok:1,	/* unused since v1.12 / 81dee05e82fb  unused_nat46 now auth_ok h*/
+	      unused_nat46:1,	/* unused since v1.12 / 81dee05e82fb */
 	      lb_loopback:1,
 	      seen_non_syn:1,
 	      node_port:1,
@@ -953,7 +953,8 @@ struct ct_entry {
 	      from_l7lb:1, /* Connection is originated from an L7 LB proxy */
 	      auth_required:1, /* Connection needs per connection mutual auth */
 	      from_tunnel:1, /* Connection is over tunnel */
-	      reserved:5;
+		  auth_ok:1, /* Connection is authenticated */
+	      reserved:4;
 	__u16 rev_nat_index;
 	/* In the kernel ifindex is u32, so we need to check in cilium-agent
 	 * that ifindex of a NodePort device is <= MAX(u16).

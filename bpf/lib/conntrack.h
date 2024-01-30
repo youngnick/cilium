@@ -271,6 +271,9 @@ __ct_lookup(const void *map, struct __ctx_buff *ctx, const void *tuple,
 			*monitor = ct_update_timeout(entry, is_tcp, dir, seen_flags);
 
 		ct_state->rev_nat_index = entry->rev_nat_index;
+
+		ct_state->auth_required = entry->auth_required;
+		ct_state->auth_ok = entry->auth_ok;
 		if (dir == CT_SERVICE) {
 			ct_state->backend_id = entry->backend_id;
 			ct_state->syn = syn;
@@ -283,8 +286,6 @@ __ct_lookup(const void *map, struct __ctx_buff *ctx, const void *tuple,
 			ct_state->proxy_redirect = entry->proxy_redirect;
 			ct_state->from_l7lb = entry->from_l7lb;
 			ct_state->from_tunnel = entry->from_tunnel;
-			ct_state->auth_required = entry->auth_required;
-			ct_state->auth_ok = entry->auth_ok;
 #ifndef HAVE_FIB_IFINDEX
 			ct_state->ifindex = entry->ifindex;
 #endif

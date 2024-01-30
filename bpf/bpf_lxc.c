@@ -920,7 +920,10 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 				     &policy_match_type, &audited, ext_err, &proxy_port);
 
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
-		if (ct_state->auth_ok != 0) {
+		if (ct_state->auth_required) {
+	 		//verdict = CTX_ACT_OK; /* allow if auth done */		
+		}
+		if (ct_state->auth_ok) {
 	 		verdict = CTX_ACT_OK; /* allow if auth done */		
 		}
 	}
@@ -1920,7 +1923,10 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, int ifindex, __u32 src_la
 				      SECLABEL_IPV4, &policy_match_type, &audited, ext_err,
 				      proxy_port);
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
-		if (ct_state->auth_ok != 0) {
+		if (ct_state->auth_required) {
+	 		// verdict = CTX_ACT_OK; /* allow if auth done */		
+		}
+		if (ct_state->auth_ok) {
 	 		verdict = CTX_ACT_OK; /* allow if auth done */		
 		}
 	}

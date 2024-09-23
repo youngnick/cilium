@@ -96,9 +96,10 @@ func (td *testData) addIdentity(id *identity.Identity) {
 
 // testPolicyContexttype is a dummy context used when evaluating rules.
 type testPolicyContextType struct {
-	isDeny bool
-	ns     string
-	sc     *SelectorCache
+	isDeny   bool
+	ns       string
+	sc       *SelectorCache
+	fromFile bool
 }
 
 func (p *testPolicyContextType) GetNamespace() string {
@@ -109,14 +110,14 @@ func (p *testPolicyContextType) GetSelectorCache() *SelectorCache {
 	return p.sc
 }
 
-func (p *testPolicyContextType) GetTLSContext(tls *api.TLSContext) (ca, public, private string, err error) {
+func (p *testPolicyContextType) GetTLSContext(tls *api.TLSContext) (ca, public, private string, fromFile bool, err error) {
 	switch tls.Secret.Name {
 	case "tls-cert":
-		return "", "fake public cert", "fake private key", nil
+		return "", "fake public cert", "fake private key", p.fromFile, nil
 	case "tls-ca-certs":
-		return "fake CA certs", "", "", nil
+		return "fake CA certs", "", "", p.fromFile, nil
 	}
-	return "", "", "", fmt.Errorf("Unknown test secret '%s'", tls.Secret.Name)
+	return "", "", "", p.fromFile, fmt.Errorf("Unknown test secret '%s'", tls.Secret.Name)
 }
 
 func (p *testPolicyContextType) GetEnvoyHTTPRules(*api.L7Rules) (*cilium.HttpNetworkPolicyRules, bool) {
@@ -299,7 +300,8 @@ func TestMergeAllowAllL3AndShadowedL7(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctx := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -430,7 +432,8 @@ func TestMergeIdenticalAllowAllL3AndRestrictedL7HTTP(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	expected := NewL4PolicyMapWithValues(map[string]*L4Filter{"80/TCP": {
 		Port:     80,
@@ -512,7 +515,8 @@ func TestMergeIdenticalAllowAllL3AndRestrictedL7Kafka(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -596,7 +600,8 @@ func TestMergeIdenticalAllowAllL3AndMismatchingParsers(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -644,7 +649,8 @@ func TestMergeIdenticalAllowAllL3AndMismatchingParsers(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxToA = SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -693,7 +699,8 @@ func TestMergeIdenticalAllowAllL3AndMismatchingParsers(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxToA = SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -742,7 +749,8 @@ func TestMergeIdenticalAllowAllL3AndMismatchingParsers(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxAToC := SearchContext{From: labelsA, To: labelsC, Trace: TRACE_VERBOSE}
@@ -799,7 +807,8 @@ func TestMergeTLSTCPPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxFromFoo := SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -892,7 +901,8 @@ func TestMergeTLSHTTPPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxFromFoo := SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -1002,7 +1012,8 @@ func TestMergeTLSSNIPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxFromFoo := SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -1097,7 +1108,8 @@ func TestMergeListenerPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxFromFoo := SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -1148,7 +1160,8 @@ func TestMergeListenerPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxFromFoo = SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -1228,7 +1241,8 @@ func TestMergeListenerPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxFromFoo = SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -1310,7 +1324,8 @@ func TestMergeListenerPolicy(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxFromFoo = SearchContext{From: labels.ParseSelectLabelArray("foo"), Trace: TRACE_VERBOSE}
@@ -1388,7 +1403,8 @@ func TestL3RuleShadowedByL3AllowAll(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1455,7 +1471,8 @@ func TestL3RuleShadowedByL3AllowAll(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxToA = SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1536,7 +1553,8 @@ func TestL3RuleWithL7RulePartiallyShadowedByL3AllowAll(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1615,7 +1633,8 @@ func TestL3RuleWithL7RulePartiallyShadowedByL3AllowAll(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxToA = SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1707,7 +1726,8 @@ func TestL3RuleWithL7RuleShadowedByL3AllowAll(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1797,7 +1817,8 @@ func TestL3RuleWithL7RuleShadowedByL3AllowAll(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxToA = SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1890,7 +1911,8 @@ func TestL3SelectingEndpointAndL3AllowAllMergeConflictingL7(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -1945,7 +1967,8 @@ func TestL3SelectingEndpointAndL3AllowAllMergeConflictingL7(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer = new(bytes.Buffer)
 	ctxToA = SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -2004,7 +2027,8 @@ func TestMergingWithDifferentEndpointsSelectedAllowSameL7(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -2089,7 +2113,8 @@ func TestMergingWithDifferentEndpointSelectedAllowAllL7(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -2170,7 +2195,8 @@ func TestAllowingLocalhostShadowsL7(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxToA := SearchContext{To: labelsA, Trace: TRACE_VERBOSE}
@@ -2232,7 +2258,8 @@ func TestEntitiesL3(t *testing.T) {
 					},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxFromA := SearchContext{From: labelsA, Trace: TRACE_VERBOSE}
@@ -2282,7 +2309,8 @@ func TestEgressEmptyToEndpoints(t *testing.T) {
 					}},
 				},
 			},
-		}}
+		},
+	}
 
 	buffer := new(bytes.Buffer)
 	ctxFromA := SearchContext{From: labelsA, Trace: TRACE_VERBOSE}

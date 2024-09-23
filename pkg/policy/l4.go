@@ -16,6 +16,7 @@ import (
 
 	cilium "github.com/cilium/proxy/go/cilium/api"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/container/bitlpm"
@@ -74,6 +75,11 @@ type TLSContext struct {
 	TrustedCA        string `json:"trustedCA,omitempty"`
 	CertificateChain string `json:"certificateChain,omitempty"`
 	PrivateKey       string `json:"privateKey,omitempty"`
+	// Secret holds the name of the Secret that was referenced in the Policy
+	Secret types.NamespacedName
+	// FromFile is true if the values in the keys above were read from the filesystem
+	// and not a Kubernetes Secret
+	FromFile bool
 }
 
 // Equal returns true if 'a' and 'b' have the same contents.
@@ -781,11 +787,14 @@ const (
 	OriginatingTLS TLSDirection = "originating"
 )
 
+// getCerts reads certificates out of the PolicyContext, reading from k8s or local files depending on config
+// and puts the values into the relevant keys in the TLSContext. Note that if the returned TLSContext.FromFile is
+// `false`, then this has been read from Kubernetes.
 func (l4 *L4Filter) getCerts(policyCtx PolicyContext, tls *api.TLSContext, direction TLSDirection) (*TLSContext, error) {
 	if tls == nil {
 		return nil, nil
 	}
-	ca, public, private, err := policyCtx.GetTLSContext(tls)
+	ca, public, private, fromFile, err := policyCtx.GetTLSContext(tls)
 	if err != nil {
 		log.WithError(err).Warningf("policy: Error getting %s TLS Context.", direction)
 		return nil, err
@@ -807,6 +816,8 @@ func (l4 *L4Filter) getCerts(policyCtx PolicyContext, tls *api.TLSContext, direc
 		TrustedCA:        ca,
 		CertificateChain: public,
 		PrivateKey:       private,
+		FromFile:         fromFile,
+		Secret:           types.NamespacedName(*tls.Secret),
 	}, nil
 }
 
@@ -816,7 +827,8 @@ func (l4 *L4Filter) getCerts(policyCtx PolicyContext, tls *api.TLSContext, direc
 // rules via the `rule` parameter.
 // Not called with an empty peerEndpoints.
 func createL4Filter(policyCtx PolicyContext, peerEndpoints api.EndpointSelectorSlice, auth *api.Authentication, rule api.Ports, port api.PortProtocol,
-	protocol api.L4Proto, ruleLabels labels.LabelArray, ingress bool, fqdns api.FQDNSelectorSlice) (*L4Filter, error) {
+	protocol api.L4Proto, ruleLabels labels.LabelArray, ingress bool, fqdns api.FQDNSelectorSlice,
+) (*L4Filter, error) {
 	selectorCache := policyCtx.GetSelectorCache()
 
 	portName := ""
@@ -1003,8 +1015,8 @@ func (l4 *L4Filter) attach(ctx PolicyContext, l4Policy *L4Policy) policyFeatures
 // hostWildcardL7 determines if L7 traffic from Host should be
 // wildcarded (in the relevant daemon mode).
 func createL4IngressFilter(policyCtx PolicyContext, fromEndpoints api.EndpointSelectorSlice, auth *api.Authentication, hostWildcardL7 []string, rule api.Ports, port api.PortProtocol,
-	protocol api.L4Proto, ruleLabels labels.LabelArray) (*L4Filter, error) {
-
+	protocol api.L4Proto, ruleLabels labels.LabelArray,
+) (*L4Filter, error) {
 	filter, err := createL4Filter(policyCtx, fromEndpoints, auth, rule, port, protocol, ruleLabels, true, nil)
 	if err != nil {
 		return nil, err
@@ -1031,8 +1043,8 @@ func createL4IngressFilter(policyCtx PolicyContext, fromEndpoints api.EndpointSe
 // to the original rules that the filter is derived from. This filter may be
 // associated with a series of L7 rules via the `rule` parameter.
 func createL4EgressFilter(policyCtx PolicyContext, toEndpoints api.EndpointSelectorSlice, auth *api.Authentication, rule api.Ports, port api.PortProtocol,
-	protocol api.L4Proto, ruleLabels labels.LabelArray, fqdns api.FQDNSelectorSlice) (*L4Filter, error) {
-
+	protocol api.L4Proto, ruleLabels labels.LabelArray, fqdns api.FQDNSelectorSlice,
+) (*L4Filter, error) {
 	return createL4Filter(policyCtx, toEndpoints, auth, rule, port, protocol, ruleLabels, false, fqdns)
 }
 
@@ -1106,8 +1118,8 @@ func addL4Filter(policyCtx PolicyContext,
 	ctx *SearchContext, resMap L4PolicyMap,
 	p api.PortProtocol, proto api.L4Proto,
 	filterToMerge *L4Filter,
-	ruleLabels labels.LabelArray) error {
-
+	ruleLabels labels.LabelArray,
+) error {
 	existingFilter := resMap.ExactLookup(p.Port, uint16(p.EndPort), string(proto))
 	if existingFilter == nil {
 		resMap.Upsert(p.Port, uint16(p.EndPort), string(proto), filterToMerge)

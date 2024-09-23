@@ -438,3 +438,11 @@ func (*fakeXdsServer) RemoveNetworkPolicy(ep endpoint.EndpointInfoSource) {
 func (*fakeXdsServer) UpdateNetworkPolicy(ep endpoint.EndpointUpdater, vis *policy.VisibilityPolicy, policy *policy.L4Policy, ingressPolicyEnforced bool, egressPolicyEnforced bool, wg *completion.WaitGroup) (error, func() error) {
 	panic("unimplemented")
 }
+
+func (*fakeXdsServer) GetPolicySecretSyncNamespace() string {
+	panic("unimplemented")
+}
+
+func (*fakeXdsServer) SetPolicySecretSyncNamespace(string) {
+	panic("unimplemented")
+}

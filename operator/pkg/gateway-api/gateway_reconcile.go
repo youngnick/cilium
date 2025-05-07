@@ -348,6 +348,16 @@ func (r *gatewayReconciler) filterTLSRoutesByListener(ctx context.Context, gw *g
 
 func isAttachable(_ context.Context, gw *gatewayv1.Gateway, route metav1.Object, parents []gatewayv1.RouteParentStatus) bool {
 	for _, rps := range parents {
+
+		// If the Group and Kind don't match, then this parentRef is not a Gateway and we should not attach.
+		if rps.ParentRef.Group != nil && string(*rps.ParentRef.Group) != gw.GroupVersionKind().Group {
+			continue
+		}
+
+		if rps.ParentRef.Kind != nil && string(*rps.ParentRef.Kind) != gw.Kind {
+			continue
+		}
+
 		if helpers.NamespaceDerefOr(rps.ParentRef.Namespace, route.GetNamespace()) != gw.GetNamespace() ||
 			string(rps.ParentRef.Name) != gw.GetName() {
 			continue

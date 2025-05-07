@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,6 +21,11 @@ import (
 
 	"github.com/cilium/cilium/operator/pkg/model/translation"
 	gatewayApiTranslation "github.com/cilium/cilium/operator/pkg/model/translation/gateway-api"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	envoy_config_route_v3 "github.com/cilium/proxy/go/envoy/config/route/v3"
+	"github.com/google/go-cmp/cmp"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 )
 
 var gwFixture = []client.Object{
@@ -244,6 +250,121 @@ var gwFixture = []client.Object{
 			},
 		},
 	},
+	&corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gamma-service",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"pre-existing-annotation": "true",
+			},
+		},
+	},
+	// This Service would be created when you create the Gateway
+	&corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cilium-gateway-gamma-service",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"pre-existing-annotation": "true",
+			},
+		},
+		Status: corev1.ServiceStatus{
+			LoadBalancer: corev1.LoadBalancerStatus{
+				Ingress: []corev1.LoadBalancerIngress{
+					{
+						IP: "10.10.10.10",
+						Ports: []corev1.PortStatus{
+							{
+								Port:     80,
+								Protocol: "TCP",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	/// Gateway that has the same name as a GAMMA Service
+	&gatewayv1.Gateway{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Gateway",
+			APIVersion: gatewayv1.GroupName,
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gamma-service",
+			Namespace: "default",
+		},
+		Spec: gatewayv1.GatewaySpec{
+			GatewayClassName: "cilium",
+			Listeners: []gatewayv1.Listener{
+				{
+					Name:     "http",
+					Port:     80,
+					Protocol: "HTTP",
+				},
+			},
+		},
+	},
+	// Valid GAMMA HTTPRoute to check for naming collisions
+	&gatewayv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gamma-http-route",
+			Namespace: "default",
+		},
+		Spec: gatewayv1.HTTPRouteSpec{
+			CommonRouteSpec: gatewayv1.CommonRouteSpec{
+				ParentRefs: []gatewayv1.ParentReference{
+					{
+						Name:  "gamma-service",
+						Kind:  ptr.To[gatewayv1.Kind]("Service"),
+						Group: ptr.To[gatewayv1.Group](""),
+					},
+				},
+			},
+			Rules: []gatewayv1.HTTPRouteRule{
+				{
+					Matches: []gatewayv1.HTTPRouteMatch{
+						{
+							Path: &gatewayv1.HTTPPathMatch{
+								Type:  ptr.To[gatewayv1.PathMatchType](gatewayv1.PathMatchPathPrefix),
+								Value: ptr.To[string]("/hello"),
+							},
+						},
+					},
+					BackendRefs: []gatewayv1.HTTPBackendRef{
+						{
+							BackendRef: gatewayv1.BackendRef{
+								BackendObjectReference: gatewayv1.BackendObjectReference{
+									Name: "gamma-backend",
+									Port: ptr.To[gatewayv1.PortNumber](80),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Status: gatewayv1.HTTPRouteStatus{
+			RouteStatus: gatewayv1.RouteStatus{
+				Parents: []gatewayv1.RouteParentStatus{
+					{
+						ParentRef: gatewayv1.ParentReference{
+							Name:  "gamma-service",
+							Kind:  ptr.To[gatewayv1.Kind]("Service"),
+							Group: ptr.To[gatewayv1.Group](""),
+						},
+						ControllerName: "io.cilium/gateway-controller",
+						Conditions: []metav1.Condition{
+							{
+								Type:   "Accepted",
+								Status: "True",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
 }
 
 var tlsRouteFixtures = []client.Object{
@@ -401,6 +522,76 @@ func Test_gatewayReconciler_Reconcile(t *testing.T) {
 		require.Equal(t, "True", string(gw.Status.Listeners[0].Conditions[1].Status))
 		require.Equal(t, "ResolvedRefs", gw.Status.Listeners[0].Conditions[2].Type)
 		require.Equal(t, "True", string(gw.Status.Listeners[0].Conditions[2].Status))
+	})
+
+	t.Run("Gateway with same name as GAMMA service should not have HTTPRoutes that don't reference it attach", func(t *testing.T) {
+		key := client.ObjectKey{
+			Namespace: "default",
+			Name:      "gamma-service",
+		}
+		result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: key})
+
+		// First reconcile should wait for LB status before writing addresses into Ingress status
+		require.NoError(t, err)
+		require.Equal(t, ctrl.Result{}, result)
+
+		gw := &gatewayv1.Gateway{}
+		err = c.Get(t.Context(), key, gw)
+		require.NoError(t, err)
+
+		// Check that the gateway status has been updated
+		err = c.Get(t.Context(), key, gw)
+		require.NoError(t, err)
+
+		require.Len(t, gw.Status.Conditions, 2)
+		require.Equal(t, "Accepted", gw.Status.Conditions[0].Type)
+		require.Equal(t, "True", string(gw.Status.Conditions[0].Status))
+		require.Equal(t, "Gateway successfully scheduled", gw.Status.Conditions[0].Message)
+		require.Equal(t, "Programmed", gw.Status.Conditions[1].Type)
+		require.Equal(t, "True", string(gw.Status.Conditions[1].Status))
+		require.Equal(t, "Gateway successfully reconciled", gw.Status.Conditions[1].Message)
+
+		require.Len(t, gw.Status.Addresses, 1)
+		require.Equal(t, "IPAddress", string(*gw.Status.Addresses[0].Type))
+		require.Equal(t, "10.10.10.10", gw.Status.Addresses[0].Value)
+
+		require.Len(t, gw.Status.Listeners, 1)
+		require.Equal(t, "http", string(gw.Status.Listeners[0].Name))
+		require.Len(t, gw.Status.Listeners[0].Conditions, 3)
+		require.Equal(t, "Programmed", gw.Status.Listeners[0].Conditions[0].Type)
+		require.Equal(t, "True", string(gw.Status.Listeners[0].Conditions[0].Status))
+		require.Equal(t, "Programmed", gw.Status.Listeners[0].Conditions[0].Reason)
+		require.Equal(t, "Listener Programmed", gw.Status.Listeners[0].Conditions[0].Message)
+		require.Equal(t, "Accepted", gw.Status.Listeners[0].Conditions[1].Type)
+		require.Equal(t, "True", string(gw.Status.Listeners[0].Conditions[1].Status))
+		require.Equal(t, "ResolvedRefs", gw.Status.Listeners[0].Conditions[2].Type)
+		require.Equal(t, "True", string(gw.Status.Listeners[0].Conditions[2].Status))
+
+		// In this case, the only way to tell that we've got this right is to fetch the relevant CEC
+		// and validate that there is not Route config present inside there.
+		cec := &ciliumv2.CiliumEnvoyConfig{}
+		cecKey := types.NamespacedName{
+			Name:      "cilium-gateway-gamma-service",
+			Namespace: "default",
+		}
+		err = c.Get(t.Context(), cecKey, cec)
+		require.NoError(t, err, "Could not get cilium-gateway-gamma-service CEC")
+
+		route := &envoy_config_route_v3.RouteConfiguration{}
+
+		err = proto.Unmarshal(cec.Spec.Resources[1].Any.Value, route)
+		require.NoError(t, err, "Could not unmarshal RouteConfiguration")
+
+		// The desired RouteConfiguration here should be empty, because the Route
+		// should not attach.
+		desired_routeConfig := &envoy_config_route_v3.RouteConfiguration{
+			Name: "listener-insecure",
+		}
+
+		diffOutput := cmp.Diff(desired_routeConfig, route, protocmp.Transform())
+		if len(diffOutput) != 0 {
+			t.Errorf("Routes did not match for gamma-service Gateway config:\n%s\n", diffOutput)
+		}
 	})
 
 	t.Run("valid http gateway - long name", func(t *testing.T) {

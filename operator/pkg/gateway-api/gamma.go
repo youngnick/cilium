@@ -197,13 +197,9 @@ func getGammaReconcileRequestsForRoute(ctx context.Context, c client.Client, obj
 }
 
 func isValidGammaService(svc *corev1.Service) bool {
-<<<<<<< HEAD
-	return svc.Spec.Type == corev1.ServiceTypeClusterIP
-=======
 	if svc.Spec.Type == corev1.ServiceTypeClusterIP {
 		return true
 	}
 
 	return false
->>>>>>> 1c2856b8c8 (Fix GAMMA reconciler for multiple HTTPRoutes)
 }

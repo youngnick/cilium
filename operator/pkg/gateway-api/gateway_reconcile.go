@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/google/go-cmp/cmp"
@@ -14,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -41,7 +43,6 @@ import (
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *gatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	scopedLog := r.logger.With(
-		logfields.Controller, gateway,
 		logfields.Resource, req.NamespacedName,
 	)
 	scopedLog.Info("Reconciling Gateway")
@@ -124,6 +125,12 @@ func (r *gatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		scopedLog.WarnContext(ctx, fmt.Sprintf("DEPRECATED: The Gateway <%s/%s> is setting an IP address using the infrastructure annotations <%s>."+
 			" These should be set using the spec.addresses field in Gateway objects instead."+
 			" At a future date this annotation will be removed if no spec.addresses are set.", gw.GetNamespace(), gw.GetName(), annotation.LBIPAMIPKeyAlias))
+	}
+
+	// Run the HTTPRoute route checks here and update the status accordingly.
+	if err := r.setHTTPRouteStatuses(scopedLog, ctx, original, httpRouteList, grants); err != nil {
+		scopedLog.ErrorContext(ctx, "Unable to update HTTPRoute Status", logfields.Error, err)
+		return controllerruntime.Fail(err)
 	}
 
 	httpRoutes := r.filterHTTPRoutesByGateway(ctx, gw, httpRouteList.Items)
@@ -643,4 +650,151 @@ func (r *gatewayReconciler) verifyGatewayStaticAddresses(gw *gatewayv1.Gateway) 
 		}
 	}
 	return nil
+}
+
+// runCommonRouteChecks runs all the checks that are common across all supported Route types.
+//
+// Uses the helpers.Input interface to ensure that this still applies as new types are added.
+func (r *gatewayReconciler) runCommonRouteChecks(input routechecks.Input, parentRefs []gatewayv1.ParentReference, objNamespace string) error {
+	for _, parent := range parentRefs {
+		// If this parentRef is not a Gateway parentRef, then skip it.
+		if !helpers.IsGateway(parent) {
+			continue
+		}
+
+		// Similarly, if this Gateway is not a matching one, then
+		if !r.parentIsMatchingGateway(parent, objNamespace) {
+			continue
+		}
+
+		// set Accepted to okay, this wil be overwritten in checks if needed
+		input.SetParentCondition(parent, metav1.Condition{
+			Type:    string(gatewayv1.RouteConditionAccepted),
+			Status:  metav1.ConditionTrue,
+			Reason:  string(gatewayv1.RouteReasonAccepted),
+			Message: "Accepted HTTPRoute",
+		})
+
+		// set ResolvedRefs to okay, this wil be overwritten in checks if needed
+		input.SetParentCondition(parent, metav1.Condition{
+			Type:    string(gatewayv1.RouteConditionResolvedRefs),
+			Status:  metav1.ConditionTrue,
+			Reason:  string(gatewayv1.RouteReasonResolvedRefs),
+			Message: "Service reference is valid",
+		})
+
+		// run the Gateway validators
+		for _, fn := range []routechecks.CheckWithParentFunc{
+			routechecks.CheckGatewayRouteKindAllowed,
+			routechecks.CheckGatewayMatchingPorts,
+			routechecks.CheckGatewayMatchingHostnames,
+			routechecks.CheckGatewayMatchingSection,
+			routechecks.CheckGatewayAllowedForNamespace,
+		} {
+			continueCheck, err := fn(input, parent)
+			if err != nil {
+				return fmt.Errorf("failed to apply Gateway check: %w", err)
+			}
+
+			if !continueCheck {
+				break
+			}
+		}
+
+		// Run the Rule validators, these need to be run per-parent so that we
+		// don't update status for parents we don't own.
+		for _, fn := range []routechecks.CheckWithParentFunc{
+			routechecks.CheckAgainstCrossNamespaceBackendReferences,
+			routechecks.CheckBackend,
+			routechecks.CheckHasServiceImportSupport,
+			routechecks.CheckBackendIsExistingService,
+		} {
+			continueCheck, err := fn(input, parent)
+			if err != nil {
+				return fmt.Errorf("failed to apply Backend check: %w", err)
+			}
+
+			if !continueCheck {
+				break
+			}
+		}
+
+	}
+
+	return nil
+}
+
+func (r *gatewayReconciler) parentIsMatchingGateway(parent gatewayv1.ParentReference, namespace string) bool {
+	hasMatchingControllerFn := hasMatchingController(context.Background(), r.Client, controllerName, r.logger)
+	if !helpers.IsGateway(parent) {
+		return false
+	}
+	gw := &gatewayv1.Gateway{}
+	if err := r.Client.Get(context.Background(), types.NamespacedName{
+		Namespace: helpers.NamespaceDerefOr(parent.Namespace, namespace),
+		Name:      string(parent.Name),
+	}, gw); err != nil {
+		return false
+	}
+	if hasMatchingControllerFn(gw) {
+		return true
+	}
+
+	return false
+}
+
+func (r *gatewayReconciler) setHTTPRouteStatuses(scopedLog *slog.Logger, ctx context.Context, gateway *gatewayv1.Gateway, httpRoutes *gatewayv1.HTTPRouteList, grants *gatewayv1beta1.ReferenceGrantList) error {
+	scopedLog.Debug("Updating HTTPRoute statuses for GAMMA Service", numRoutes, len(httpRoutes.Items))
+	for httpRouteIndex, original := range httpRoutes.Items {
+
+		hr := original.DeepCopy()
+
+		// input for the validators
+		// The validators will mutate the HTTPRoute as required, setting its status correctly.
+		i := &routechecks.HTTPRouteInput{
+			Ctx:       ctx,
+			Logger:    scopedLog.With(logfields.Resource, hr),
+			Client:    r.Client,
+			Grants:    grants,
+			HTTPRoute: hr,
+		}
+
+		if err := r.runCommonRouteChecks(i, hr.Spec.ParentRefs, hr.Namespace); err != nil {
+			return r.handleHTTPRouteReconcileErrorWithStatus(ctx, scopedLog, err, hr, &original)
+		}
+
+		if len(hr.Status.Parents) > 0 && len(hr.Status.Parents[0].Conditions) > 1 {
+			scopedLog.Info("ResolvedRefs status", "status", hr.Status.RouteStatus.Parents[0].Conditions[1].Status, "httpRoute", hr.Name)
+		}
+
+		// Route-specific checks will go in here separately if required.
+
+		// Checks finished, apply the status to the actual objects.
+		if err := r.updateHTTPRouteStatus(ctx, scopedLog, &original, hr); err != nil {
+			return fmt.Errorf("failed to update HTTPRoute status: %w", err)
+		}
+
+		// Update the cached copy with the same status changes to prevent re-fetching from client cache.
+		httpRoutes.Items[httpRouteIndex].Status = hr.Status
+	}
+
+	return nil
+}
+
+func (r *gatewayReconciler) handleHTTPRouteReconcileErrorWithStatus(ctx context.Context, scopedLog *slog.Logger, reconcileErr error, original *gatewayv1.HTTPRoute, modified *gatewayv1.HTTPRoute) error {
+	if err := r.updateHTTPRouteStatus(ctx, scopedLog, original, modified); err != nil {
+		return fmt.Errorf("failed to update Gateway status while handling the reconcile error: %w: %w", reconcileErr, err)
+	}
+	return nil
+}
+
+func (r *gatewayReconciler) updateHTTPRouteStatus(ctx context.Context, scopedLog *slog.Logger, original *gatewayv1.HTTPRoute, new *gatewayv1.HTTPRoute) error {
+	oldStatus := original.Status.DeepCopy()
+	newStatus := new.Status.DeepCopy()
+
+	if cmp.Equal(oldStatus, newStatus, cmpopts.IgnoreFields(metav1.Condition{}, lastTransitionTime)) {
+		return nil
+	}
+	scopedLog.Debug("Updating HTTPRoute status", tlsRoute, types.NamespacedName{Name: original.Name, Namespace: original.Namespace})
+	return r.Client.Status().Update(ctx, new)
 }

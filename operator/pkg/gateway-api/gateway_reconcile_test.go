@@ -53,9 +53,10 @@ func Test_Conformance(t *testing.T) {
 	})
 
 	tests := []struct {
-		name    string
-		gateway []types.NamespacedName
-		wantErr bool
+		name                 string
+		gateway              []types.NamespacedName
+		disableServiceImport bool
+		wantErr              bool
 	}{
 		{
 			name: "gateway-http-listener-isolation",
@@ -158,6 +159,8 @@ func Test_Conformance(t *testing.T) {
 		{name: "httproute-hostname-intersection", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "httproute-https-listener", gateway: []types.NamespacedName{gatewaySameNamespaceWithHTTPS}},
 		{name: "httproute-invalid-backendref-unknown-kind", gateway: []types.NamespacedName{gatewaySameNamespace}},
+		{name: "httproute-invalid-backendref-missing-service-port", gateway: []types.NamespacedName{gatewaySameNamespace}},
+		{name: "httproute-invalid-backendref-missing-serviceimport-port", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "httproute-invalid-cross-namespace-backend-ref", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "httproute-invalid-cross-namespace-parent-ref", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "httproute-invalid-nonexistent-backendref", gateway: []types.NamespacedName{gatewaySameNamespace}},
@@ -189,6 +192,13 @@ func Test_Conformance(t *testing.T) {
 		{name: "httproute-timeout-backend-request", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "httproute-timeout-request", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "httproute-weight", gateway: []types.NamespacedName{gatewaySameNamespace}},
+		{name: "httproute-service-types", gateway: []types.NamespacedName{gatewaySameNamespace}},
+		{name: "httproute-invalid-parentref-types", gateway: []types.NamespacedName{gatewaySameNamespace}},
+		{name: "httproute-serviceimport-backend", gateway: []types.NamespacedName{gatewaySameNamespace}},
+		{
+			name: "httproute-invalid-serviceimport-no-crd", gateway: []types.NamespacedName{gatewaySameNamespace},
+			disableServiceImport: true,
+		},
 		{name: "tlsroute-invalid-reference-grant", gateway: []types.NamespacedName{gatewaySameNamespace}},
 		{name: "tlsroute-simple-same-namespace", gateway: []types.NamespacedName{gatewaySameNamespace}},
 	}
@@ -200,21 +210,23 @@ func Test_Conformance(t *testing.T) {
 					base := readInputDir(t, "testdata/gateway/base")
 					input := readInputDir(t, fmt.Sprintf("testdata/gateway/%s/input", tt.name))
 
-					c := fake.NewClientBuilder().
-						WithScheme(testScheme()).
+					clientBuilder := fake.NewClientBuilder().
 						WithObjects(append(base, input...)...).
 						WithStatusSubresource(&corev1.Service{}).
 						WithStatusSubresource(&gatewayv1.GRPCRoute{}).
 						WithStatusSubresource(&gatewayv1.HTTPRoute{}).
 						WithStatusSubresource(&gatewayv1alpha2.TLSRoute{}).
 						WithStatusSubresource(&gatewayv1.Gateway{}).
-						WithStatusSubresource(&gatewayv1.GatewayClass{}).
-						Build()
+						WithStatusSubresource(&gatewayv1.GatewayClass{})
 
-					hrReconciler := &httpRouteReconciler{
-						Client: c,
-						logger: logger,
+					switch tt.disableServiceImport {
+					case true:
+						clientBuilder.WithScheme(testSchemeNoServiceImport())
+					case false:
+						clientBuilder.WithScheme(testScheme())
 					}
+
+					c := clientBuilder.Build()
 
 					r := &gatewayReconciler{
 						Client:     c,
@@ -227,9 +239,6 @@ func Test_Conformance(t *testing.T) {
 					err := c.List(t.Context(), hrList)
 					require.NoError(t, err)
 					filterList := filterHTTPRoute(hrList, gw.Name, gw.Namespace)
-					for _, hr := range filterList {
-						_, _ = hrReconciler.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&hr)})
-					}
 
 					// Reconcile the gateway under test
 					result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: gw})

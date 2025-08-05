@@ -233,6 +233,35 @@ func (r *gatewayReconciler) indexGatewayByImplementation(rawObj client.Object) [
 	return []string{}
 }
 
+func (r *gatewayReconciler) indexTLSRoutebyBackendService(rawObj client.Object) []string {
+	route := rawObj.(*gatewayv1alpha2.TLSRoute)
+	var backendServices []string
+
+	if r.routeHasMatchingGatewayParent(route.Spec.ParentRefs, route.Namespace) {
+		for _, rule := range route.Spec.Rules {
+			for _, backend := range rule.BackendRefs {
+				namespace := helpers.NamespaceDerefOr(backend.Namespace, route.Namespace)
+				backendServiceName, err := helpers.GetBackendServiceName(r.Client, namespace, backend.BackendObjectReference)
+				if err != nil {
+					r.logger.Error("Failed to get backend service name",
+						logfields.Controller, logfields.TLSRoute,
+						logfields.Resource, client.ObjectKeyFromObject(rawObj),
+						logfields.Error, err)
+					continue
+				}
+				backendServices = append(backendServices,
+					types.NamespacedName{
+						Namespace: helpers.NamespaceDerefOr(backend.Namespace, route.Namespace),
+						Name:      backendServiceName,
+					}.String(),
+				)
+			}
+		}
+	}
+
+	return backendServices
+}
+
 // enqueueRequestForOwningGatewayClass returns an event handler that, when given a GatewayClass,
 // returns reconcile.Requests for all Gateway objects belonging to the given GatewayClass.
 func (r *gatewayReconciler) enqueueRequestForOwningGatewayClass() handler.EventHandler {
@@ -359,6 +388,16 @@ func (r *gatewayReconciler) enqueueRequestForBackendService() handler.EventHandl
 			return []reconcile.Request{}
 		}
 
+		// Then, fetch all TLSRoutes that reference this service, using the backendServiceIndex
+		tlsrList := &gatewayv1alpha2.TLSRouteList{}
+
+		if err := r.Client.List(ctx, tlsrList, &client.ListOptions{
+			FieldSelector: fields.OneTermEqualSelector(backendServiceTLSRouteIndex, client.ObjectKeyFromObject(o).String()),
+		}); err != nil {
+			scopedLog.Error("Failed to get related HTTPRoutes", logfields.Error, err)
+			return []reconcile.Request{}
+		}
+
 		// Fetch all the Cilium-relevant Gateways using the implementationGatewayIndex.
 		gwList := &gatewayv1.GatewayList{}
 		if err := r.Client.List(ctx, gwList, &client.ListOptions{
@@ -389,6 +428,22 @@ func (r *gatewayReconciler) enqueueRequestForBackendService() handler.EventHandl
 				parentFullName := types.NamespacedName{
 					Name:      string(parent.Name),
 					Namespace: helpers.NamespaceDerefOr(parent.Namespace, hr.Namespace),
+				}
+				if _, found := allCiliumGatewaysSet[parentFullName.String()]; found {
+					reconcileRequests[reconcile.Request{NamespacedName: parentFullName}] = struct{}{}
+				}
+			}
+		}
+
+		// iterate through the TLSRoutes, return a reconcile.Request for each Gateways that is relevant.
+		for _, tlsr := range tlsrList.Items {
+			for _, parent := range tlsr.Spec.ParentRefs {
+				if !helpers.IsGateway(parent) {
+					continue
+				}
+				parentFullName := types.NamespacedName{
+					Name:      string(parent.Name),
+					Namespace: helpers.NamespaceDerefOr(parent.Namespace, tlsr.Namespace),
 				}
 				if _, found := allCiliumGatewaysSet[parentFullName.String()]; found {
 					reconcileRequests[reconcile.Request{NamespacedName: parentFullName}] = struct{}{}

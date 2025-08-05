@@ -38,6 +38,9 @@ const (
 	// Indexes Gateways and records if the Gateway is relevant for Cilium.
 	implementationGatewayIndex = "implementationGatewayIndex"
 
+	// Indexes TLSRoutes by all the backend Services referenced in the object.
+	backendServiceTLSRouteIndex = "backendServiceTLSRouteIndex"
+
 	// Indexes GAMMA HTTPRoutes by the all the backend Services referenced in the object.
 	gammaBackendServiceIndex = "gammaBackendServiceIndex"
 

@@ -133,10 +133,19 @@ func (r *gammaReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return controllerruntime.Fail(err)
 	}
 
+	r.logger.Debug("filtering HTTPRoutes", "numRoutes", len(httpRouteList.Items))
+	filteredHTTPRoutes := r.filterOnlyAcceptedHTTPRoutes(svc, httpRouteList.Items)
+	filteredGRPCRoutes := r.filterOnlyAcceptedGRPCRoutes(svc, grpcRouteList.Items)
+
+	if len(filteredHTTPRoutes) == 0 && len(filteredGRPCRoutes) == 0 {
+		// The reconcile succeeded, but with no result.
+		return controllerruntime.Success()
+	}
+
 	// TODO(youngnick): GammaHTTPRoutes needs to be updated now that we have a source Service.
 	httpListeners := ingestion.GammaHTTPRoutes(r.logger, ingestion.GammaInput{
-		HTTPRoutes: httpRouteList.Items,
-		GRPCRoutes: grpcRouteList.Items,
+		HTTPRoutes: filteredHTTPRoutes,
+		GRPCRoutes: filteredGRPCRoutes,
 		Services:   servicesList.Items,
 
 		ReferenceGrants: grants.Items,
@@ -166,7 +175,7 @@ func (r *gammaReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 func (r *gammaReconciler) setHTTPRouteStatuses(gammaLogger *slog.Logger, ctx context.Context, gammaService *corev1.Service, httpRoutes *gatewayv1.HTTPRouteList, grants *gatewayv1beta1.ReferenceGrantList) error {
 	gammaLogger.DebugContext(ctx, "Updating HTTPRoute statuses for GAMMA Service", numRoutes, len(httpRoutes.Items))
-	for _, original := range httpRoutes.Items {
+	for httpRouteIndex, original := range httpRoutes.Items {
 
 		hr := original.DeepCopy()
 
@@ -239,6 +248,9 @@ func (r *gammaReconciler) setHTTPRouteStatuses(gammaLogger *slog.Logger, ctx con
 		if err := r.updateHTTPRouteStatus(ctx, &original, hr); err != nil {
 			return fmt.Errorf("failed to update HTTPRoute status: %w", err)
 		}
+
+		// Update the cached copy with the same status changes to prevent re-fetching from client cache.
+		httpRoutes.Items[httpRouteIndex].Status = hr.Status
 	}
 
 	return nil
@@ -246,7 +258,7 @@ func (r *gammaReconciler) setHTTPRouteStatuses(gammaLogger *slog.Logger, ctx con
 
 func (r *gammaReconciler) setGRPCRouteStatuses(gammaLogger *slog.Logger, ctx context.Context, gammaService *corev1.Service, grpcRoutes *gatewayv1.GRPCRouteList, grants *gatewayv1beta1.ReferenceGrantList) error {
 	gammaLogger.DebugContext(ctx, "Updating GRPCRoute statuses for GAMMA Service", numRoutes, len(grpcRoutes.Items))
-	for _, original := range grpcRoutes.Items {
+	for grpcRouteIndex, original := range grpcRoutes.Items {
 
 		grpc := original.DeepCopy()
 
@@ -319,6 +331,9 @@ func (r *gammaReconciler) setGRPCRouteStatuses(gammaLogger *slog.Logger, ctx con
 		if err := r.updateGRPCRouteStatus(ctx, &original, grpc); err != nil {
 			return fmt.Errorf("failed to update GRPCRoute status: %w", err)
 		}
+
+		// Update the cached copy with the same status changes to prevent re-fetching from client cache.
+		grpcRoutes.Items[grpcRouteIndex].Status = grpc.Status
 	}
 
 	return nil
@@ -343,6 +358,43 @@ func (r *gatewayReconciler) ensureEndpointSliceDeleted(ctx context.Context, name
 	r.logger.DebugContext(ctx, "Successfully deleted EndpointSlice", logfields.Name, name)
 
 	return nil
+}
+
+func (r *gammaReconciler) filterOnlyAcceptedHTTPRoutes(svc *corev1.Service, routes []gatewayv1.HTTPRoute) []gatewayv1.HTTPRoute {
+	filteredRoutes := []gatewayv1.HTTPRoute{}
+	r.logger.Debug("Filtering HTTPRoutes for service", "service", svc.GetName())
+	for _, route := range routes {
+		if r.isGammaRouteAccepted(svc, route.Status.Parents, route.GetNamespace()) {
+			filteredRoutes = append(filteredRoutes, route)
+		}
+	}
+
+	return filteredRoutes
+}
+
+func (r *gammaReconciler) filterOnlyAcceptedGRPCRoutes(svc *corev1.Service, routes []gatewayv1.GRPCRoute) []gatewayv1.GRPCRoute {
+	filteredRoutes := []gatewayv1.GRPCRoute{}
+	r.logger.Debug("Filtering GRPCRoutes for service", "service", svc.GetName())
+	for _, route := range routes {
+		if r.isGammaRouteAccepted(svc, route.Status.Parents, route.GetNamespace()) {
+			filteredRoutes = append(filteredRoutes, route)
+		}
+	}
+
+	return filteredRoutes
+}
+
+func (r *gammaReconciler) isGammaRouteAccepted(svc *corev1.Service, parents []gatewayv1.RouteParentStatus, objNamespace string) bool {
+	r.logger.Debug("isGammaRouteAccepted checking parents", "numParents", len(parents))
+	for _, parent := range parents {
+		r.logger.Debug("Checking parent for match to service", "svcName", svc.GetName(), "parent", parent)
+		if helpers.IsGammaServiceEqual(parent.ParentRef, svc, objNamespace) &&
+			helpers.IsAccepted(parent.Conditions) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (r *gammaReconciler) ensureEnvoyConfig(ctx context.Context, desired *ciliumv2.CiliumEnvoyConfig) error {

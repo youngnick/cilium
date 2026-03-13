@@ -62,9 +62,10 @@ func Test_gammaReconciler_Reconcile(t *testing.T) {
 	})
 
 	tests := []struct {
-		name       string
-		serviceKey []types.NamespacedName
-		wantErr    bool
+		name         string
+		serviceKey   []types.NamespacedName
+		wantErr      bool
+		noCECPresent bool
 	}{
 		{name: "mesh-basic", serviceKey: []types.NamespacedName{serviceKeyEcho}},
 		{name: "mesh-split", serviceKey: []types.NamespacedName{serviceKeyEcho}},
@@ -80,6 +81,7 @@ func Test_gammaReconciler_Reconcile(t *testing.T) {
 		{name: "mesh-rewrite-path", serviceKey: []types.NamespacedName{serviceKeyEcho}},
 		{name: "mesh-weighted-backends", serviceKey: []types.NamespacedName{serviceKeyEcho}},
 		{name: "mesh-grpc-weight", serviceKey: []types.NamespacedName{serviceKeyEcho}},
+		{name: "mesh-invalid-cross-namespace", serviceKey: []types.NamespacedName{serviceKeyEcho}, noCECPresent: true},
 	}
 
 	for _, tt := range tests {
@@ -119,7 +121,7 @@ func Test_gammaReconciler_Reconcile(t *testing.T) {
 
 					t.Logf("Test %s, HTTPRoutes: %d, GRPCRoutes: %d", tt.name, len(filterHTTPRouteList), len(filterGRPCRouteList))
 					result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: serviceKey})
-					require.Equal(t, tt.wantErr, err != nil, "Error mismatch")
+					require.Equal(t, tt.wantErr, err != nil, "Error mismatch, error: %s", err)
 					require.Equal(t, ctrl.Result{}, result)
 
 					// Checking the output for Service
@@ -129,6 +131,7 @@ func Test_gammaReconciler_Reconcile(t *testing.T) {
 					err = c.Get(t.Context(), serviceKey, actualService)
 					actualService.TypeMeta = serviceTypeMeta
 					require.NoError(t, err)
+					require.Empty(t, cmp.Diff(expectedService, actualService, cmpIgnoreFields...))
 
 					for _, hr := range filterHTTPRouteList {
 						actualHR := &gatewayv1.HTTPRoute{}
@@ -150,17 +153,22 @@ func Test_gammaReconciler_Reconcile(t *testing.T) {
 						require.Empty(t, cmp.Diff(expectedGRPCR, actualGRPCR, cmpIgnoreFields...))
 					}
 
-					if !tt.wantErr {
-						// Checking the output for CiliumEnvoyConfig
-						actualCEC := &ciliumv2.CiliumEnvoyConfig{}
-						err = c.Get(t.Context(), serviceKey, actualCEC)
-						require.NoError(t, err, "Could not get CiliumEnvoyConfig and wasn't expecting a reconciliation error")
-						expectedCEC := &ciliumv2.CiliumEnvoyConfig{}
-						readOutput(t, fmt.Sprintf("testdata/gamma/%s/output/cec-%s.yaml", tt.name, serviceKey.Name), expectedCEC)
+					actualCEC := &ciliumv2.CiliumEnvoyConfig{}
 
-						require.NoError(t, err)
-						require.Empty(t, cmp.Diff(expectedCEC, actualCEC, protocmp.Transform()))
+					if tt.noCECPresent {
+						err = c.Get(t.Context(), serviceKey, actualCEC)
+						require.Error(t, err, "Should not have got CiliumEnvoyConfig, but did.")
+						return
 					}
+
+					// Checking the output for CiliumEnvoyConfig
+					err = c.Get(t.Context(), serviceKey, actualCEC)
+					require.NoError(t, err, "Could not get CiliumEnvoyConfig and wasn't expecting a reconciliation error")
+					expectedCEC := &ciliumv2.CiliumEnvoyConfig{}
+					readOutput(t, fmt.Sprintf("testdata/gamma/%s/output/cec-%s.yaml", tt.name, serviceKey.Name), expectedCEC)
+
+					require.NoError(t, err)
+					require.Empty(t, cmp.Diff(expectedCEC, actualCEC, protocmp.Transform()))
 				})
 			}
 		})

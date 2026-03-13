@@ -1,0 +1,39 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  creationTimestamp: null
+  name: gateway-conformance-mesh-test
+  namespace: gateway-conformance-mesh-client
+  resourceVersion: "1000"
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      name: echo
+      namespace: gateway-conformance-mesh
+      port: 80
+  rules:
+    - backendRefs:
+        - name: echo-v1
+          namespace: gateway-conformance-mesh
+          port: 8080
+status:
+  parents:
+    - conditions:
+        - lastTransitionTime: "2025-06-19T03:48:45Z"
+          message: HTTPRoute is not allowed to attach to this Service - it and the Service must be in the same namespace
+          reason: NoMatchingParent
+          status: "False"
+          type: Accepted
+        - lastTransitionTime: "2025-06-19T03:48:45Z"
+          message: Cross namespace references are not allowed
+          reason: "RefNotPermitted"
+          status: "False"
+          type: ResolvedRefs
+      controllerName: io.cilium/gateway-controller
+      parentRef:
+        group: ""
+        kind: Service
+        name: echo
+        namespace: gateway-conformance-mesh
+        port: 80
